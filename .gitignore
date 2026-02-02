@@ -1,0 +1,40 @@
+.Rhistory
+.RData
+.Rproj.user/
+.Ruserdata
+
+# Quarto
+.quarto/
+_site/
+_book/
+*.html
+*.pdf
+*.docx
+*.pptx
+
+# RMarkdown/knitr
+*.utf8.md
+*.knit.md
+
+# Data/artifacts
+data/
+datasets/
+*.csv
+*.tsv
+*.xlsx
+*.parquet
+*.rds
+*.feather
+
+# Logs/cache
+*.log
+cache/
+tmp/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

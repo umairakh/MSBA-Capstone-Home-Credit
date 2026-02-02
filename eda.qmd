@@ -1,0 +1,516 @@
+---
+title: "EDA"
+author: "Umair Akhtar"
+format: html
+editor: visual
+---
+
+#  **Notebook Purpose**
+
+This project’s goal is to predict loan default risk in the Home Credit dataset so lenders can make more accurate, fair, and timely credit decisions. The core business problem is reducing losses from defaults while expanding access to credit for qualified applicants, and the analytic problem is identifying borrower characteristics and application signals that meaningfully explain default risk. The purpose of this EDA notebook is to profile the data, assess data quality, and explore relationships among key features and the target, answering questions such as: What are the distributions of core applicant attributes? Where are missing values concentrated? Which variables show the strongest separation between defaulters and non‑defaulters? Are there notable outliers or segments that warrant special handling in modeling?
+
+#  **Business Problem**
+
+Home Credit Group faces the challenge of accurately identifying which applicants are likely to default on their loans at the time of application. Inaccurate predictions create two costly outcomes: approving loans that later default, leading to direct financial losses and increased provisioning costs, and rejecting creditworthy applicants, resulting in foregone interest income and reduced market share. As Home Credit operates in underbanked markets with high loan volumes and diverse customer profiles, even small errors in risk assessment can materially impact portfolio profitability. Improving default prediction accuracy has therefore become increasingly important to sustaining profitable growth while supporting responsible lending.
+
+# Libraries and Data Import
+
+This section loads the R packages required for data manipulation, visualization, and exploratory analysis throughout the notebook. Using a consistent set of libraries ensures reproducibility and readability of the analysis.
+
+The application training and test datasets are then imported. The training dataset contains historical loan application records along with the target variable indicating default status, while the test dataset contains similar applicant information without observed outcomes. These datasets form the foundation for all subsequent exploratory analysis.
+
+```{r}
+#| message: false
+#| warning: false
+# -------------------------------
+# Load required libraries
+# -------------------------------
+# tidyverse: data manipulation and visualization
+# janitor: clean column names and simple summaries
+# skimr: compact data summaries
+# corrplot: correlation visualization (used later)
+# scales: formatting axes and labels in plots
+
+
+
+library(tidyverse)
+library(janitor)
+library(skimr)
+library(corrplot)
+library(scales)
+
+# -------------------------------
+# Import datasets
+# -------------------------------
+# application_train contains the target variable (TARGET)
+# application_test has the same predictors but no target
+# sample_submission is included for completeness
+
+application_train <- read_csv("application_train.csv")
+application_test  <- read_csv("application_test.csv")
+sample_submission <- read_csv("sample_submission.csv")
+
+# -------------------------------
+# Standardize column names
+# -------------------------------
+# Clean column names to snake_case for consistency
+# This improves readability and avoids coding errors later
+
+application_train <- clean_names(application_train)
+application_test  <- clean_names(application_test)
+sample_submission <- clean_names(sample_submission)
+
+```
+
+## Description of the Data
+
+This section provides an overview of the structure and contents of the application datasets used in this project. Understanding the size, composition, and variable types of the data is a critical first step in exploratory data analysis, as it helps frame subsequent analyses and informs decisions about data preparation and modeling.
+
+The focus is on identifying the number of observations, the number of variables, and the mix of numeric and categorical features in both the training and test datasets. This overview also highlights the presence of the target variable, which is available only in the training data.
+
+```{r}
+# -------------------------------
+# Dataset dimensions
+# -------------------------------
+# Examine the number of rows and columns in each dataset
+# This helps us understand the scale of the data
+
+dim(application_train)
+dim(application_test)
+
+# -------------------------------
+# Target variable presence
+# -------------------------------
+# Confirm that the target variable exists only in the training data
+
+"target" %in% names(application_train)
+"target" %in% names(application_test)
+
+# -------------------------------
+# Variable type breakdown
+# -------------------------------
+# Count numeric vs categorical variables in the training dataset
+# This informs later decisions about encoding and transformations
+
+application_train %>%
+  summarise(
+    numeric_variables = sum(map_lgl(., is.numeric)),
+    categorical_variables = sum(map_lgl(., is.character))
+  )
+
+# -------------------------------
+# Compact data summary
+# -------------------------------
+# skimr provides a concise overview without overwhelming output
+# Useful for understanding distributions and missingness at a high level
+
+skim(application_train)
+
+```
+
+The training dataset contains **307,511 loan applications** described by **122 variables**, indicating a large and information-rich dataset suitable for predictive analytics. As expected, the **target variable is present only in the training data**, while it is absent from the test dataset, confirming the correct separation between observed outcomes and future predictions.
+
+The majority of variables (**106 out of 122**) are numeric, while a smaller subset (**16 variables**) are categorical in nature. This predominance of numeric features suggests that much of the information is already represented in a quantitative form, which is advantageous for many modeling approaches. At the same time, the presence of categorical variables implies that appropriate encoding strategies will be required during data preparation.
+
+Overall, the size and mixed variable composition of the dataset reflect the complexity of credit risk assessment. The large number of predictors offers substantial potential for capturing patterns associated with default risk, but it also underscores the importance of careful exploratory analysis, feature selection, and data preprocessing to avoid overfitting and ensure model interpretability.
+
+## Target Variable Analysis
+
+This section examines the distribution of the target variable in the training dataset to assess whether the data are balanced with respect to loan default. Understanding class balance is critical because highly imbalanced outcomes can make naive performance metrics, such as accuracy, misleading.
+
+The analysis also computes the accuracy of a simple baseline model that always predicts the majority class. This provides a reference point against which more sophisticated models can later be evaluated.
+
+```{r}
+# -------------------------------
+# Distribution of the target variable
+# -------------------------------
+# Count the number of non-defaults (0) and defaults (1)
+# and compute their proportions
+
+target_distribution <- application_train %>%
+  count(target) %>%
+  mutate(
+    proportion = n / sum(n)
+  )
+
+target_distribution
+
+# -------------------------------
+# Visualization of class imbalance
+# -------------------------------
+# Create a bar plot to visualize the imbalance
+# Clear labels and title are included for interpretability
+
+ggplot(target_distribution, aes(x = factor(target), y = proportion)) +
+  geom_col(fill = "steelblue") +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title = "Distribution of Loan Default (Target Variable)",
+    x = "Target (0 = No Default, 1 = Default)",
+    y = "Proportion of Observations"
+  )
+
+# -------------------------------
+# Majority class baseline accuracy
+# -------------------------------
+# Identify the majority class and compute the accuracy
+# of a classifier that always predicts this class
+
+majority_class_accuracy <- max(target_distribution$proportion)
+
+majority_class_accuracy
+
+```
+
+The target variable is **strongly imbalanced**. Approximately **91.9%** of loan applications in the training dataset did **not** result in default (`TARGET = 0`), while only **8.1%** of applications resulted in default (`TARGET = 1`). This confirms that default events are relatively rare compared to non-defaults, which is consistent with real-world credit lending behavior.
+
+Due to this imbalance, a simple baseline model that always predicts the **majority class (no default)** would achieve an accuracy of approximately **91.9%**. While this accuracy appears high, such a model would fail to identify any defaulting borrowers and therefore provides no practical value for credit risk management.
+
+These results demonstrate that **accuracy alone is not an appropriate performance metric** for this problem. Effective models must prioritize the identification of high-risk applicants, even at the cost of lower overall accuracy. Consequently, future modeling efforts should consider alternative evaluation metrics—such as recall, precision, or cost-sensitive measures—that better reflect the business objective of minimizing financial losses from loan defaults.
+
+# Relationship Between Target and Predictors
+
+In this section, the relationship between the target variable (loan default) and selected predictors is explored to identify variables that may be strongly associated with default risk. Visual comparisons between defaulters and non-defaulters help reveal patterns that can inform feature selection and modeling decisions in later stages of the project.
+
+## Target vs EXT_SOURCE_2
+
+**External credit risk scores**, such as `EXT_SOURCE_2`, are designed to summarize borrower risk based on information external to the loan application. Examining how this score differs between defaulters and non-defaulters provides insight into its usefulness as a predictor of default.
+
+```{r}
+#| message: false
+#| warning: false
+# -------------------------------
+# EXT_SOURCE_2 vs TARGET
+# -------------------------------
+# Compare the distribution of external risk scores
+# between defaulters and non-defaulters using a boxplot
+
+ggplot(application_train, aes(x = factor(target), y = ext_source_2)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(
+    title = "EXT_SOURCE_2 by Loan Default Status",
+    x = "Target (0 = No Default, 1 = Default)",
+    y = "External Risk Score (EXT_SOURCE_2)"
+  )
+
+```
+
+The boxplot shows a **clear and substantial difference** in external risk scores (`EXT_SOURCE_2`) between defaulters and non-defaulters. Applicants who **did not default** (`TARGET = 0`) have **higher median risk scores** and a distribution that is shifted noticeably upward compared to those who **did default** (`TARGET = 1`).
+
+Defaulters exhibit **lower median values** and a wider spread toward lower scores, indicating greater risk as assessed by external credit sources. Although there is some overlap between the two distributions, the separation between their central tendencies is pronounced, suggesting that `EXT_SOURCE_2` captures meaningful information about borrower default risk.
+
+Overall, this visualization indicates that `EXT_SOURCE_2` is a **strong and informative predictor** of loan default and is likely to play a significant role in any downstream predictive model.
+
+## Target vs AMT_INCOME_TOTAL
+
+Applicant income reflects an individual’s capacity to service debt and is therefore a natural candidate for default risk analysis. This section compares income distributions across default outcomes.
+
+```{r}
+# -------------------------------
+# AMT_INCOME_TOTAL vs TARGET
+# -------------------------------
+# Visualize income differences by default status
+# Log scale is used to reduce skewness
+
+ggplot(application_train, aes(x = factor(target), y = amt_income_total)) +
+  geom_boxplot(fill = "lightgreen") +
+  scale_y_log10(labels = dollar_format()) +
+  labs(
+    title = "Applicant Income by Loan Default Status",
+    x = "Target (0 = No Default, 1 = Default)",
+    y = "Total Income (log scale)"
+  )
+
+```
+
+The boxplot compares applicant income distributions for defaulters and non-defaulters using a logarithmic scale to account for extreme right skew. Applicants who default (`TARGET = 1`) tend to have a **slightly lower median income** than those who do not default (`TARGET = 0`), suggesting that income is related to default risk in the expected direction.
+
+However, the two distributions exhibit **substantial overlap**, and the difference in central tendency is modest compared to that observed for external risk scores. Both groups contain numerous high-income outliers, indicating that high income alone does not guarantee lower default risk and that income is not a sufficient standalone predictor.
+
+Overall, applicant income appears to be a **moderately informative predictor** of default. While it contributes useful information about repayment capacity, its predictive value is likely to be strongest when combined with other features—such as external risk scores or loan amount ratios—rather than used in isolation.
+
+## Target vs AMT_CREDIT
+
+The total loan amount requested may influence default risk by increasing repayment burden. This section examines how loan size differs between defaulters and non-defaulters.
+
+```{r}
+# -------------------------------
+# AMT_CREDIT vs TARGET
+# -------------------------------
+# Compare requested loan amounts across default outcomes
+# Log scale is used due to right-skewed distributions
+
+ggplot(application_train, aes(x = factor(target), y = amt_credit)) +
+  geom_boxplot(fill = "salmon") +
+  scale_y_log10(labels = dollar_format()) +
+  labs(
+    title = "Loan Amount by Default Status",
+    x = "Target (0 = No Default, 1 = Default)",
+    y = "Loan Amount (log scale)"
+  )
+
+```
+
+The boxplot compares the distribution of loan amounts requested by defaulters and non-defaulters on a logarithmic scale to account for right skew. The two distributions are **very similar**, with comparable medians and substantial overlap across most of the range. This indicates that applicants who default do not systematically request much larger or smaller loan amounts than those who do not default.
+
+Although both groups exhibit extreme outliers at higher loan amounts, these occur in both default outcomes and do not appear to meaningfully distinguish defaulters from non-defaulters. Overall, loan amount alone shows **little separation** between the two classes, suggesting that it is **not a strong standalone predictor** of default risk.
+
+While `AMT_CREDIT` may still provide useful information when combined with other variables—such as income or external risk scores—it does not appear to be highly informative on its own.
+
+## Most Predictive Predictor
+
+Among the predictors examined, **`EXT_SOURCE_2` is the most predictive of loan default**, showing clear and substantial separation between defaulters and non-defaulters. Applicant income (`AMT_INCOME_TOTAL`) demonstrates a **moderate relationship** with default, with defaulters tending to have slightly lower incomes, though with considerable overlap between groups. In contrast, the loan amount requested (`AMT_CREDIT`) exhibits **minimal discriminatory power** when considered in isolation.
+
+These findings suggest that external credit risk assessments should be prioritized in subsequent modeling efforts, while income-related variables may play a supporting role. Loan amount is likely to be most useful when combined with other features—such as affordability ratios or interaction terms—rather than used as a primary predictor.
+
+# Missing Data Analysis and Proposed Handling Strategy
+
+This section examines the extent and patterns of missing data in the application training and test datasets. Understanding missingness is critical, as inappropriate handling of missing values can introduce bias, reduce predictive performance, or limit the applicability of models to new data.
+
+The analysis focuses on identifying variables with high proportions of missing values, comparing missingness patterns across the training and test datasets, and proposing a principled strategy for handling missing data in subsequent modeling stages.
+
+```{r Missing Rate by Column (Train and Test)}
+# -------------------------------
+# Compute missing rate by variable (training data)
+# -------------------------------
+# For each column, calculate the proportion of missing values
+
+missing_train <- application_train %>%
+  summarise(across(everything(), ~ mean(is.na(.)))) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "missing_rate"
+  ) %>%
+  arrange(desc(missing_rate))
+
+# Display top variables with highest missingness
+head(missing_train, 15)
+
+# -------------------------------
+# Compute missing rate by variable (test data)
+# -------------------------------
+# Repeat the same analysis for the test dataset
+
+missing_test <- application_test %>%
+  summarise(across(everything(), ~ mean(is.na(.)))) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "missing_rate"
+  ) %>%
+  arrange(desc(missing_rate))
+
+head(missing_test, 15)
+
+```
+
+The results show that several variables exhibit **very high levels of missingness**, with some features missing in **more than 65–70% of observations** in both the training and test datasets. These variables are primarily related to **detailed property characteristics**, such as common area measurements and apartment-level attributes.
+
+Importantly, the missingness patterns are **highly consistent across the training and test datasets**, indicating that missing values are structural rather than accidental. This consistency suggests that the missingness likely reflects information that is not applicable or not collected for certain types of properties, rather than random data quality issues.
+
+```{r Distribution of Missingness across Variables}
+# -------------------------------
+# Summarize missingness distribution (training data)
+# -------------------------------
+# Group variables by missingness ranges to understand overall scope
+
+missing_train %>%
+  mutate(
+    missing_group = case_when(
+      missing_rate == 0 ~ "0%",
+      missing_rate <= 0.1 ~ "0–10%",
+      missing_rate <= 0.3 ~ "10–30%",
+      missing_rate <= 0.6 ~ "30–60%",
+      TRUE ~ "60%+"
+    )
+  ) %>%
+  count(missing_group) %>%
+  arrange(desc(n))
+
+```
+
+While many variables contain little or no missing data, a **non-trivial subset of features has extremely high missing rates**. Retaining these variables without careful handling could introduce noise and reduce model stability, particularly given the relatively small proportion of default cases in the data.
+
+## Strategy to Handle Missing Data
+
+Based on the observed missingness patterns, a **differentiated approach** to missing data handling is proposed:
+
+**1. Remove columns with extreme missingness**\
+Variables with missing rates above approximately **60%** will be excluded from modeling. These are primarily detailed property-related features, such as `commonarea_avg`, `livingapartments_avg`, and `nonlivingapartments_avg`, which are missing for most applicants and are unlikely to provide reliable predictive value. Removing these columns simplifies the feature space and reduces the risk of overfitting.
+
+**2. Retain rows rather than removing observations**\
+Removing rows with missing values is not recommended, as it would result in a substantial loss of data and could disproportionately affect the minority class (defaulters). For example, excluding applicants with missing values in variables such as `ext_source_2` or `amt_annuity` would remove many observations and potentially bias the dataset. Preserving rows is therefore especially important given the imbalanced target distribution.
+
+**3. Impute remaining missing values**\
+For numeric variables with moderate missingness, **median imputation** is appropriate due to skewed distributions, as in the case of `ext_source_2`, `amt_annuity`, or `days_employed`. For categorical variables such as `occupation_type`, missing values can be treated as an explicit **“Missing” category**, allowing models to capture information contained in the absence of data.
+
+**4. Consider missingness indicators**\
+For selected variables, binary indicators for missingness (e.g., `ext_source_2_missing` or `occupation_type_missing`) may be included, as the presence of missing values may itself be informative about applicant characteristics or data collection processes.
+
+# Data Quality and Sanity Checks
+
+This section examines the application datasets for potential data quality issues, including implausible or placeholder values, variables with little to no variation, and other anomalies that may affect downstream modeling. The goal is not to aggressively clean the data at this stage, but rather to identify issues that require careful handling or adjustment in later preprocessing steps.
+
+Importantly, extreme values are not automatically treated as errors, as outliers may represent valid but rare borrower profiles.
+
+```{r Check for Known Placehodler values}
+# -------------------------------
+# Check for known placeholder values
+# -------------------------------
+# DAYS_EMPLOYED contains a known placeholder value (365243)
+# representing missing or unknown employment duration
+
+application_train %>%
+  summarise(
+    total_obs = n(),
+    placeholder_days_employed = sum(days_employed == 365243, na.rm = TRUE),
+    placeholder_rate = mean(days_employed == 365243, na.rm = TRUE)
+  )
+
+```
+
+Out of **307,511** observations in the training dataset, **55,374 records (approximately 18.0%)** contain the value `365243` for the variable `days_employed`. This value is **not a plausible employment duration** and is widely recognized in this dataset as a **placeholder indicating missing or unknown employment history** rather than a true numeric value.
+
+The relatively high prevalence of this placeholder suggests that employment duration is frequently unavailable for a substantial portion of applicants. Treating this value as a literal number would distort summary statistics and potentially bias predictive models. Therefore, this value should be **recoded as missing** and handled using appropriate imputation techniques or supplemented with a missingness indicator in later preprocessing steps.
+
+```{r Check for Impossible values}
+# -------------------------------
+# Sanity checks for selected numeric variables
+# -------------------------------
+# Examine ranges to identify potentially impossible values
+
+application_train %>%
+  summarise(
+    min_income = min(amt_income_total, na.rm = TRUE),
+    max_income = max(amt_income_total, na.rm = TRUE),
+    min_credit = min(amt_credit, na.rm = TRUE),
+    max_credit = max(amt_credit, na.rm = TRUE),
+    min_age_days = min(days_birth, na.rm = TRUE)
+  )
+
+```
+
+The observed ranges for income and credit amounts include extreme values; however, these are not necessarily errors. High-income or high-credit observations may correspond to valid but uncommon applicants. As such, these values are treated as **outliers rather than mistakes** and will not be removed during EDA.
+
+Age values are recorded as negative numbers (days before application), which is consistent with the dataset’s encoding scheme and does not represent an error.
+
+## Outlier Exploration in Key Numeric Variables
+
+This section examines the presence of extreme values in key numeric variables to determine whether they represent data errors or valid but rare observations. Identifying outliers is important for understanding variable distributions and for informing potential transformation or modeling decisions. However, extreme values are not automatically treated as mistakes, particularly in financial data where legitimate values can vary widely.
+
+```{r Outlier Exploration}
+# -------------------------------
+# Outlier visualization for income and credit amount
+# -------------------------------
+# Boxplots are used to identify extreme values.
+# A logarithmic scale is applied due to heavy right skew.
+
+outlier_data <- application_train %>%
+  select(amt_income_total, amt_credit) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "value"
+  )
+
+ggplot(outlier_data, aes(x = variable, y = value)) +
+  geom_boxplot(fill = "lightgray") +
+  scale_y_log10(labels = scales::dollar_format()) +
+  labs(
+    title = "Outlier Distribution for Income and Credit Amount",
+    x = "Variable",
+    y = "Value (log scale)"
+  )
+
+```
+
+The boxplots show that both **applicant income (`amt_income_total`)** and **loan amount (`amt_credit`)** exhibit **strong right-skewed distributions**, even when viewed on a logarithmic scale. A small number of observations lie far above the upper quartiles, indicating the presence of extreme values. These outliers are more pronounced for income, where a limited set of applicants report exceptionally high earnings.
+
+Importantly, the observed ranges remain **plausible within the context of financial data** and do not indicate data entry errors. Instead, they likely represent valid but uncommon cases, such as high-net-worth individuals or unusually large loan requests. As such, these values should be treated as **legitimate outliers rather than mistakes** and retained during analysis.
+
+## Proposed Solutions for Outliers
+
+**Logarithmic transformation**\
+Applying log transformations to variables such as income and credit amount reduces skewness and limits the influence of extreme values, improving model stability and interpretability.
+
+**Robust modeling techniques**\
+Models that are less sensitive to outliers (e.g., tree-based methods) can naturally accommodate extreme values without requiring aggressive preprocessing.
+
+**Capping or winsorization (if needed)**\
+In cases where extreme values unduly influence model estimates, values may be capped at high percentiles (e.g., 99th percentile) to limit their impact while preserving rank order.
+
+**Use of ratios and derived features**\
+Constructing features such as **credit-to-income ratios** can provide more meaningful signals than raw values and help normalize the effect of extreme observations.
+
+# Joining Application Data with Transactional Credit History
+
+For exploratory purposes, the bureau transactional data were aggregated at the applicant level using account-level summaries from `bureau.csv`. Monthly bureau balance data were not fully expanded during EDA due to their large size and computational cost. The aggregated bureau features nonetheless capture key aspects of applicants’ prior credit exposure and delinquency history and are sufficient for evaluating whether transactional data add predictive signal at this stage.
+
+```{r Loading and Joining Bureau Data}
+# Load bureau data only (much smaller than bureau_balance)
+bureau <- read_csv("bureau.csv") %>%
+  clean_names()
+
+bureau_applicant_agg <- bureau %>%
+  group_by(sk_id_curr) %>%
+  summarise(
+    num_bureau_accounts = n(),
+    num_active_accounts = sum(credit_active == "Active", na.rm = TRUE),
+    total_credit_amount = sum(amt_credit_sum, na.rm = TRUE),
+    avg_credit_amount = mean(amt_credit_sum, na.rm = TRUE),
+    ever_overdue = max(credit_day_overdue > 0, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Join aggregated bureau features to application data
+application_train_joined <- application_train %>%
+  left_join(bureau_applicant_agg, by = "sk_id_curr")
+
+application_test_joined <- application_test %>%
+  left_join(bureau_applicant_agg, by = "sk_id_curr")
+
+```
+
+## Exploration of Joined Transactional (Bureau) Features
+
+After aggregating and joining external credit bureau data to the application dataset, this section examines whether the newly added transactional features show meaningful relationships with loan default. These features summarize applicants’ prior credit exposure and repayment behavior and may provide predictive signal beyond the application-level variables.
+
+The analysis focuses on a small set of interpretable bureau-derived features and evaluates their relationship with the target variable using summary statistics and visualizations.
+
+```{r Default Rate by Historical Delinquency Indicator}
+# ------------------------------------------------
+# Default rate by historical overdue indicator
+# ------------------------------------------------
+# Compare default rates for applicants with and without
+# any overdue days in bureau credit records
+
+application_train_joined %>%
+  group_by(ever_overdue) %>%
+  summarise(
+    default_rate = mean(target, na.rm = TRUE),
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  ggplot(aes(x = factor(ever_overdue), y = default_rate)) +
+  geom_col(fill = "steelblue") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "Default Rate by Historical Overdue Status (Bureau Data)",
+    x = "Ever Overdue (0 = No, 1 = Yes)",
+    y = "Default Rate"
+  )
+
+```
+
+Exploration of the joined bureau transactional data indicates that **some of the added columns show strong promise in predicting loan default**. In particular, the indicator capturing whether an applicant has **ever had overdue payments** in their bureau credit history is highly informative. Applicants with no overdue history exhibit a default rate of approximately **7–8%**, while those with any overdue history show a **substantially higher default rate exceeding 15%**. This more than doubling of the default rate demonstrates a clear and meaningful relationship between past repayment behavior and future default risk.
+
+Applicants with missing overdue information display an intermediate default rate of around **10%**, suggesting that missing transactional information may itself carry predictive signal. This supports the potential usefulness of missingness indicators when incorporating bureau features into predictive models.
+
+Overall, these findings confirm that **bureau-derived behavioral features—particularly those related to delinquency—add valuable predictive information** beyond the application-level data. In contrast, transactional features reflecting overall credit exposure appear less informative on their own. The results suggest that delinquency-based bureau variables should be prioritized in subsequent modeling efforts.
+
+# Results and EDA Summary
+
+This exploratory data analysis provided a clear understanding of the Home Credit application data, highlighting important issues related to data quality and predictor relevance. The target variable was found to be **highly imbalanced**, with defaults representing only a small fraction of observations, making accuracy an inappropriate standalone evaluation metric. Several data quality concerns were identified, most notably the presence of an implausible placeholder value (`365243`) in `days_employed` for approximately **18% of observations**, which must be treated as missing. Additionally, many property-related variables exhibited extreme missingness and are unlikely to be useful for modeling. In contrast, extreme values in income and credit amount variables were treated as valid outliers consistent with real-world variability.
+
+Exploration of predictor–target relationships revealed several **strong and interpretable patterns**. External credit risk scores (`EXT_SOURCE_2`) showed the strongest separation between defaulters and non-defaulters, while applicant income demonstrated a moderate relationship and loan amount alone showed limited predictive value. The inclusion of **transactional bureau data** added meaningful behavioral insight, particularly through indicators of historical overdue behavior, which were associated with substantially higher default rates. These findings suggest that future modeling efforts should prioritize behavioral credit history features and external risk scores, apply robust missing-data strategies, and use methods capable of handling class imbalance and capturing non-linear relationships.
